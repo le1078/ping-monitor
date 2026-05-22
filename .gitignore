@@ -1,0 +1,8 @@
+data.json
+_internal/
+dist/
+backup/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
