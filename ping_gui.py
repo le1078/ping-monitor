@@ -1183,6 +1183,7 @@ class PingApp:
         self._stop_event.clear()
         self.root.after(0, lambda: self._set_pinging(True))
         self.root.after(0, lambda: self._clear_results())
+        self.root.after(0, lambda n=len(addrs): self._log_event(f"开始检测 {n} 个地址"))
 
         total = len(addrs)
         passed = 0
@@ -1329,6 +1330,8 @@ class PingApp:
         self.last_result = {"total": total, "passed": passed, "failed": failed, "details": details}
         self.last_errors = errors
 
+        self.root.after(0, lambda t=total, p=passed, f=failed:
+                       self._log_event(f"检测完成 - 总数:{t} 通过:{p} 失败:{f}"))
         self.root.after(0, lambda: self._set_pinging(False))
         self.root.after(0, lambda: self.status_label.configure(
             text=f"完成 - 总数:{total}  通过:{passed}  失败:{failed}"))
@@ -1347,8 +1350,10 @@ class PingApp:
 
     def _add_result(self, address, group, latency, status, tcp="-", http="-"):
         lat_str = f"{latency}ms" if latency is not None else "-"
-        if status == "通过":
-            tag = "pass"
+        if status in ("失败", "内容不匹配"):
+            tag = "fail"
+        elif "通过" in status:
+            tag = "tcp_pass" if "TCP" in status or "HTTP" in status else "pass"
         elif status == "异常":
             tag = "warn"
         else:
@@ -1358,6 +1363,7 @@ class PingApp:
         item = self.result_tree.insert("", tk.END, values=(address, group, lat_str, status, tcp, http), tags=tags)
         self.result_tree.see(item)
         self.result_tree.tag_configure("pass", foreground="green")
+        self.result_tree.tag_configure("tcp_pass", foreground="#B8860B")  # 暗金色，区分于绿色通过
         self.result_tree.tag_configure("fail", foreground="red")
         self.result_tree.tag_configure("warn", foreground="orange")
         self.result_tree.tag_configure("odd", background="#f9f9f9")
@@ -1370,15 +1376,34 @@ class PingApp:
     def _apply_filter(self):
         """根据筛选条件显示/隐藏结果行"""
         filter_val = self.filter_var.get()
-        for item in self.result_tree.get_children():
-            values = self.result_tree.item(item, "values")
-            status = values[3] if len(values) > 3 else ""
+        if not self.last_result.get("details"):
+            return
+        self._clear_results()
+        self._result_row = 0
+        for addr, group, lat, status in self.last_result["details"]:
             if filter_val == "全部":
-                self.result_tree.reattach(item, "", tk.END)
-            elif status == filter_val:
-                self.result_tree.reattach(item, "", tk.END)
+                pass
+            elif filter_val == "通过":
+                if "通过" not in str(status):
+                    continue
+            elif filter_val == "异常":
+                if status != "异常":
+                    continue
+            elif filter_val == "失败":
+                if "失败" not in str(status) and status != "内容不匹配":
+                    continue
+            lat_str = f"{lat}ms" if lat is not None else "-"
+            if status in ("失败", "内容不匹配"):
+                tag = "fail"
+            elif "通过" in str(status):
+                tag = "tcp_pass" if "TCP" in str(status) or "HTTP" in str(status) else "pass"
+            elif status == "异常":
+                tag = "warn"
             else:
-                self.result_tree.detach(item)
+                tag = "fail"
+            self._result_row += 1
+            tags = (tag,) if self._result_row % 2 == 1 else (tag, "odd")
+            self.result_tree.insert("", tk.END, values=(addr, group, lat_str, status, "-", "-"), tags=tags)
 
     def _set_pinging(self, pinging):
         if pinging:
@@ -1472,6 +1497,14 @@ class PingApp:
                                  fill="#333", font=("", 12, "bold"))
 
     # ==================== 异常日志 ====================
+    def _log_event(self, msg):
+        """写入一般事件日志（始终显示）"""
+        self.error_text.configure(state=tk.NORMAL)
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.error_text.insert(tk.END, f"[{timestamp}] {msg}\n")
+        self.error_text.see(tk.END)
+        self.error_text.configure(state=tk.DISABLED)
+
     def _log_error(self, address, group, reason):
         self.error_text.configure(state=tk.NORMAL)
         timestamp = datetime.now().strftime("%H:%M:%S")
