@@ -14,6 +14,7 @@ import re
 import socket
 import urllib.request
 import urllib.error
+import ssl
 import winsound
 import queue
 from datetime import datetime
@@ -183,7 +184,11 @@ class PingApp:
             req = urllib.request.Request(url, method=method,
                                           headers={"User-Agent": "PingTool/2.0"})
             start = datetime.now()
-            resp = urllib.request.urlopen(req, timeout=timeout)
+            # 忽略SSL证书验证（工具仅检测连通性，不验证证书）
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+            resp = urllib.request.urlopen(req, timeout=timeout, context=ssl_ctx)
             elapsed = (datetime.now() - start).total_seconds() * 1000
             # GET + 关键字匹配
             kw_result = None
