@@ -1204,8 +1204,11 @@ class PingApp:
             self.root.after(0, lambda i=idx, t=total:
                             self.progress.configure(value=int((i+1)/t*100)))
 
-            # 剥离路径部分用于主机检测
-            host = address.split("/")[0] if "/" in address else address
+            # 剥离路径和协议部分用于主机检测
+            host = address
+            if "://" in host:
+                host = host.split("://", 1)[1]
+            host = host.split("/")[0] if "/" in host else host
             host = host.split(":")[0] if ":" in host else host
 
             # ---- ICMP Ping ----
