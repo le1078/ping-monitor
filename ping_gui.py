@@ -1258,7 +1258,8 @@ class PingApp:
             http_kw_result = None
             http_kw = addr_info.get("keyword", "") or self.http_keyword
             if self.detect_mode == "all":
-                code, lat, kw = self._check_http(host, method=self.http_method, keyword=http_kw)
+                # 使用原始地址（含协议/端口/路径），而非提取后的裸主机名
+                code, lat, kw = self._check_http(address, method=self.http_method, keyword=http_kw)
                 http_code = code
                 http_latency = lat
                 http_kw_result = kw
