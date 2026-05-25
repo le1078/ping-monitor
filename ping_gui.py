@@ -188,6 +188,11 @@ class PingApp:
             ssl_ctx = ssl.create_default_context()
             ssl_ctx.check_hostname = False
             ssl_ctx.verify_mode = ssl.CERT_NONE
+            # 允许旧版SSL重新协商（Python 3.12+ 默认禁用，部分老服务器需要）
+            try:
+                ssl_ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
+            except AttributeError:
+                ssl_ctx.options |= 0x4  # OP_LEGACY_SERVER_CONNECT = 0x4
             resp = urllib.request.urlopen(req, timeout=timeout, context=ssl_ctx)
             elapsed = (datetime.now() - start).total_seconds() * 1000
             # GET + 关键字匹配
@@ -1215,7 +1220,11 @@ class PingApp:
             if "://" in host:
                 host = host.split("://", 1)[1]
             host = host.split("/")[0] if "/" in host else host
-            host = host.split(":")[0] if ":" in host else host
+            custom_port = None
+            if ":" in host:
+                parts = host.split(":", 1)
+                host = parts[0]
+                custom_port = int(parts[1]) if parts[1].isdigit() else None
 
             # ---- ICMP Ping ----
             icmp_ok = False
@@ -1251,11 +1260,28 @@ class PingApp:
             # ---- TCP 检测 ----
             tcp_ok = False
             tcp_latency = None
+            tcp_str = "-"
             if self.detect_mode in ("tcp", "all"):
                 ok80, lat80 = self._check_tcp(host, 80)
                 ok443, lat443 = self._check_tcp(host, 443)
                 tcp_ok = ok80 or ok443
                 tcp_latency = lat80 or lat443
+                ports = []
+                if ok80:
+                    ports.append("80✓")
+                if ok443:
+                    ports.append("443✓")
+                # 检查URL中的自定义端口（如 8444）
+                if custom_port and custom_port not in (80, 443):
+                    ok_custom, lat_custom = self._check_tcp(host, custom_port)
+                    if ok_custom:
+                        tcp_ok = True
+                        if not tcp_latency:
+                            tcp_latency = lat_custom
+                        ports.append(f"{custom_port}✓")
+                    else:
+                        ports.append(f"{custom_port}✗")
+                tcp_str = " ".join(ports)
 
             # ---- HTTP 检测 ----
             http_code = None
@@ -1276,7 +1302,8 @@ class PingApp:
             if self.detect_mode == "all" and not overall_ok and http_code is not None:
                 overall_ok = True  # ICMP/TCP不通但HTTP有响应也算可达
 
-            tcp_str = f"通({tcp_latency:.0f}ms)" if tcp_ok else ("不通" if self.detect_mode in ("tcp", "all") else "-")
+            if not tcp_ok and self.detect_mode in ("tcp", "all") and tcp_str == "-":
+                tcp_str = "不通"
             # HTTP 结果显示
             if http_code:
                 if http_kw_result is True:
