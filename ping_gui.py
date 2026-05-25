@@ -1602,7 +1602,7 @@ class PingApp:
         target = None
         sel_group = self.group_tree.selection()
         sel_addr = self.addr_tree.selection()
-        if sel_addr:
+        if sel_addr and self._current_group != "__ALL__":
             target_type = "addr"
             group = self.get_current_group()
             idx = self.addr_tree.get_children().index(sel_addr[0])
@@ -1635,42 +1635,62 @@ class PingApp:
                 self._update_schedule_status()
 
     def _start_single_schedule(self, tid):
-        task = self.schedule_tasks[tid]
 
-        def run():
-            if tid not in self.schedule_tasks:
-                return
-            t = self.schedule_tasks[tid]
-            if t["target_type"] == "addr":
+        def do_run():
+            """执行一次检测并安排下一次定时"""
+            try:
+                if tid not in self.schedule_tasks:
+                    return
+                t = self.schedule_tasks[tid]
                 addrs = []
-                for gname, gdata in self.groups.items():
-                    for a in gdata.get("addrs", []):
-                        if a["address"] == t["target"]:
-                            addr_info = dict(a)
-                            addr_info["_group"] = gname
-                            addrs.append(addr_info)
-                            break
-                if addrs:
-                    threading.Thread(target=self._do_ping, args=(addrs,), daemon=True).start()
-            elif t["target_type"] == "group":
-                if t["target"] in self.groups:
-                    addrs = []
-                    for a in self.groups[t["target"]]["addrs"]:
-                        addr = dict(a)
-                        addr["_group"] = t["target"]
-                        addrs.append(addr)
-                    if addrs:
-                        threading.Thread(target=self._do_ping, args=(addrs,), daemon=True).start()
-            timer = threading.Timer(t["interval"] * 60, run)
-            timer.daemon = True
-            timer.start()
-            if tid in self.schedule_tasks:
-                self.schedule_tasks[tid]["timer"] = timer
+                if t["target_type"] == "addr":
+                    for gname, gdata in self.groups.items():
+                        for a in gdata.get("addrs", []):
+                            if a["address"] == t["target"]:
+                                addr_info = dict(a)
+                                addr_info["_group"] = gname
+                                addrs.append(addr_info)
+                                break
+                elif t["target_type"] == "group":
+                    if t["target"] == "__ALL__":
+                        # "全部" 虚拟分组 → 收集所有分组的所有地址
+                        for gname, gdata in self.groups.items():
+                            for a in gdata.get("addrs", []):
+                                addr = dict(a)
+                                addr["_group"] = gname
+                                addrs.append(addr)
+                    elif t["target"] in self.groups:
+                        for a in self.groups[t["target"]]["addrs"]:
+                            addr = dict(a)
+                            addr["_group"] = t["target"]
+                            addrs.append(addr)
 
-        timer = threading.Timer(task["interval"] * 60, run)
-        timer.daemon = True
-        timer.start()
-        self.schedule_tasks[tid]["timer"] = timer
+                if addrs:
+                    self.root.after(0, lambda: self._log_event(
+                        f"[定时] {t['target']} 开始定时检测 ({len(addrs)} 个地址)"))
+                    threading.Thread(target=self._do_ping, args=(addrs,), daemon=True).start()
+                else:
+                    self.root.after(0, lambda: self._log_event(
+                        f"[定时] {t['target']} 未找到匹配地址，跳过此次定时检测"))
+
+            except Exception as e:
+                self.root.after(0, lambda: self._log_event(
+                    f"[定时] {self.schedule_tasks.get(tid, {}).get('target', '?')} 定时检测异常: {e}"))
+
+            # 安排下一次执行
+            if tid in self.schedule_tasks:
+                try:
+                    interval_sec = self.schedule_tasks[tid]["interval"] * 60
+                except (KeyError, TypeError):
+                    interval_sec = 300  # 默认 5 分钟
+                timer = threading.Timer(interval_sec, do_run)
+                timer.daemon = True
+                timer.start()
+                if tid in self.schedule_tasks:
+                    self.schedule_tasks[tid]["timer"] = timer
+
+        # 立即执行一次，然后按周期循环
+        do_run()
 
     def stop_schedule(self):
         """停止所有定时循环任务"""
