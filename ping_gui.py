@@ -57,6 +57,8 @@ class PingApp:
         self._addr_drag_data = None  # 地址拖拽数据
         self._current_group = None   # 当前选中的分组
         self._syncing_group = False   # 防止从地址反选分组时递归刷新
+        self._stop_event = threading.Event()  # 强制停止检测的信号
+        self._detect_button = None  # 停止检测按钮引用
         # 系统托盘
         self.tray_icon = None
         self.tray_queue = queue.Queue()
@@ -625,6 +627,8 @@ class PingApp:
         ttk.Button(row2, text="▶ 检测选中", command=self.ping_selected).pack(side=tk.LEFT, padx=2)
         ttk.Button(row2, text="▶ 检测全部", command=self.ping_all).pack(side=tk.LEFT, padx=2)
         ttk.Button(row2, text="停止循环", command=self.stop_schedule).pack(side=tk.LEFT, padx=2)
+        self._detect_button = ttk.Button(row2, text="■ 停止检测", command=self.stop_detect, state=tk.DISABLED)
+        self._detect_button.pack(side=tk.LEFT, padx=2)
         ttk.Separator(row2, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=5)
 
         ttk.Button(row2, text="定时循环", command=self.schedule_setup).pack(side=tk.LEFT, padx=2)
@@ -1176,6 +1180,7 @@ class PingApp:
         return self.global_threshold
 
     def _do_ping(self, addrs):
+        self._stop_event.clear()
         self.root.after(0, lambda: self._set_pinging(True))
         self.root.after(0, lambda: self._clear_results())
 
@@ -1186,6 +1191,10 @@ class PingApp:
         details = []
 
         for idx, addr_info in enumerate(addrs):
+            # 检查是否被强制停止
+            if self._stop_event.is_set():
+                self.root.after(0, lambda: self.status_label.configure(text="检测已停止"))
+                break
             address = addr_info["address"]
             group_name = addr_info.get("_group", "未知")
             threshold = self._get_threshold_for(group_name, addr_info)
@@ -1372,8 +1381,15 @@ class PingApp:
         if pinging:
             self.progress.pack(fill=tk.X, padx=2, pady=2)
             self.progress.configure(value=0)
+            self._detect_button.configure(state=tk.NORMAL)
         else:
             self.progress.pack_forget()
+            self._detect_button.configure(state=tk.DISABLED)
+
+    def stop_detect(self):
+        """强制停止所有正在进行的检测"""
+        self._stop_event.set()
+        self.status_label.configure(text="正在停止检测...")
 
     # ==================== 图表 ====================
     def draw_chart(self):
