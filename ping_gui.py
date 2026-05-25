@@ -1243,7 +1243,7 @@ class PingApp:
             http_latency = None
             http_kw_result = None
             http_kw = addr_info.get("keyword", "") or self.http_keyword
-            if self.detect_mode == "all" and (icmp_ok or tcp_ok):
+            if self.detect_mode == "all":
                 code, lat, kw = self._check_http(host, method=self.http_method, keyword=http_kw)
                 http_code = code
                 http_latency = lat
@@ -1253,6 +1253,8 @@ class PingApp:
             overall_ok = icmp_ok
             if self.detect_mode in ("tcp", "all") and not icmp_ok and tcp_ok:
                 overall_ok = True  # ICMP不通但TCP通也算可达
+            if self.detect_mode == "all" and not overall_ok and http_code is not None:
+                overall_ok = True  # ICMP/TCP不通但HTTP有响应也算可达
 
             tcp_str = f"通({tcp_latency:.0f}ms)" if tcp_ok else ("不通" if self.detect_mode in ("tcp", "all") else "-")
             # HTTP 结果显示
@@ -1272,7 +1274,7 @@ class PingApp:
                     failed += 1
                     status = "内容不匹配"
                     errors.append((address, group_name, f"响应中未找到关键字'{http_kw}'"))
-                    details.append((address, group_name, latency, status))
+                    details.append((address, group_name, latency or http_latency, status))
                     self.root.after(0, lambda a=address, g=group_name, kw=http_kw:
                                    self._log_error(a, g, f"关键字'{kw}'不匹配"))
                     self.root.after(0, lambda a=address, g=group_name, l=latency, s=status:
@@ -1292,10 +1294,14 @@ class PingApp:
                     status = "通过"
                     if not icmp_ok and tcp_ok:
                         status = "通过(TCP)"
+                    elif not icmp_ok and not tcp_ok and http_code is not None:
+                        status = "通过(HTTP)"
                     elif http_kw_result is True:
                         status = "通过(内容匹配)"
-                    details.append((address, group_name, latency, status))
-                    self.root.after(0, lambda a=address, g=group_name, l=latency, s=status:
+                    # 优先ICMP延迟，其次TCP/HTTP延迟
+                    display_latency = latency or tcp_latency or http_latency
+                    details.append((address, group_name, display_latency, status))
+                    self.root.after(0, lambda a=address, g=group_name, l=display_latency, s=status:
                                    self._add_result(a, g, l, s, tcp_str, http_str))
             else:
                 failed += 1
