@@ -1207,7 +1207,8 @@ class PingApp:
                 result = subprocess.run(
                     ["ping", "-n", "1", "-w", "2000", host],
                     capture_output=True, text=True, timeout=5,
-                    encoding="gbk", errors="replace"
+                    encoding="gbk", errors="replace",
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 latency = self._parse_latency(result.stdout)
                 icmp_ok = (result.returncode == 0 and
